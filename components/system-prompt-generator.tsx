@@ -5,11 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Bot, CheckCircle, Copy, ImageIcon, X, CheckSquare, RotateCcw } from "lucide-react"
+import { Bot, CheckCircle, ImageIcon, X, CheckSquare, RotateCcw, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 const TOOL_CATEGORIES = {
@@ -837,163 +835,56 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
         </TabsList>
 
         <TabsContent value="verify" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>System Prompt Verification</CardTitle>
-                  <CardDescription>
-                    Paste your system prompt below to analyze its components and complexity
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <Textarea
-                    id="verification-input"
-                    placeholder="Paste your system prompt here for analysis..."
-                    className="min-h-[200px]"
-                    defaultValue={generatedPrompt}
-                    onChange={(e) => {
-                      setVerificationInput(e.target.value)
-                      setVerificationResult("")
-                      setEvaluationResults({})
-                      setPromptSections({})
-                    }}
-                  />
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => verifyPrompt()}
-                      disabled={isVerifying || !verificationInput.trim()}
-                      className="flex-1"
-                    >
-                      {isVerifying ? "Verifying..." : "Verify System Prompt"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>System Prompt Verification</CardTitle>
+              <CardDescription>
+                Enter your system prompt below to get a comprehensive evaluation of its clarity, completeness, and
+                effectiveness.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <label htmlFor="verification-input" className="block text-sm font-medium mb-2">
+                  System Prompt to Verify
+                </label>
+                <textarea
+                  id="verification-input"
+                  value={verificationInput}
+                  onChange={(e) => setVerificationInput(e.target.value)}
+                  placeholder="Paste your system prompt here for verification..."
+                  className="w-full min-h-[200px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
 
-              {/* System Prompt Sections Display */}
-              {Object.keys(promptSections).length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      System Prompt Sections
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copyToClipboard(JSON.stringify(promptSections, null, 2))}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy Sections
-                      </Button>
-                    </CardTitle>
-                    <CardDescription>Your system prompt has been divided into the following sections</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {[
-                        "Context Information about Applications and Entities",
-                        "Personality and Tone",
-                        "Critical Non-Negotiable Facts",
-                        "Tool Use and Response Formatting",
-                        "Guardrails and Safety Protocols",
-                        "Dynamic Behavior Scaling",
-                        "Critical Evaluation of User Input",
-                      ].map((sectionName, index) => {
-                        const sectionKey = `section_${index + 1}`
-                        const content = promptSections[sectionKey] || "Not found in this prompt"
+              <Button onClick={verifyPrompt} disabled={isVerifying || !verificationInput.trim()} className="w-full">
+                {isVerifying ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                    Verify System Prompt
+                  </>
+                )}
+              </Button>
 
-                        return (
-                          <div key={sectionKey} className="border rounded-lg p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <h4 className="font-semibold text-sm">{sectionName}</h4>
-                              <Badge variant={content !== "Not found in this prompt" ? "default" : "secondary"}>
-                                {content !== "Not found in this prompt" ? "Present" : "Missing"}
-                              </Badge>
-                            </div>
-                            <div className="bg-muted p-3 rounded text-sm">
-                              <pre className="whitespace-pre-wrap font-mono text-xs">{content}</pre>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Evaluation Results Display */}
-              {Object.keys(evaluationResults).length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      Evaluation Results
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => copyToClipboard(JSON.stringify(evaluationResults, null, 2))}
-                      >
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy Results
-                      </Button>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {Object.entries(evaluationResults).map(([testId, result]: [string, any]) => {
-                        const test = EVALUATION_TESTS.find((t) => t.id === testId)
-                        return (
-                          <div key={testId} className="border rounded-lg p-4">
-                            <div className="flex items-center justify-between mb-2">
-                              <h4 className="font-semibold">{test?.name}</h4>
-                              <Badge
-                                variant={
-                                  result.score >= 80 ? "default" : result.score >= 60 ? "secondary" : "destructive"
-                                }
-                              >
-                                {result.score}/100
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground mb-2">{test?.description}</p>
-                            <div className="bg-muted p-3 rounded text-sm">
-                              <p>
-                                <strong>Analysis:</strong> {result.analysis}
-                              </p>
-                              {result.suggestions && (
-                                <p className="mt-2">
-                                  <strong>Suggestions:</strong> {result.suggestions}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Basic Verification Results */}
               {verificationResult && (
-                <Card>
+                <Card className="mt-6">
                   <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      System Prompt Evaluation
-                      <Button variant="outline" size="sm" onClick={() => copyToClipboard(verificationResult)}>
-                        <Copy className="h-4 w-4 mr-2" />
-                        Copy Evaluation
-                      </Button>
-                    </CardTitle>
-                    <CardDescription>AI analysis of your system prompt</CardDescription>
+                    <CardTitle className="text-lg">Verification Results</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="bg-muted p-4 rounded-lg">
-                      <pre className="whitespace-pre-wrap text-sm">{verificationResult}</pre>
+                    <div className="prose max-w-none">
+                      <div className="whitespace-pre-wrap text-sm leading-relaxed">{verificationResult}</div>
                     </div>
                   </CardContent>
                 </Card>
               )}
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="images" className="space-y-6">
@@ -1233,7 +1124,8 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                     className="rounded"
                   />
                   <label htmlFor="taskRequirementsFulfilled" className="text-sm">
-                    Task Requirements: All required categories completed. Double check if natural user category uses two tools or more correctly.
+                    Task Requirements: All required categories completed. Double check if natural user category uses two
+                    tools or more correctly.
                   </label>
                 </div>
               </div>
@@ -1349,7 +1241,8 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                       className="rounded"
                     />
                     <label htmlFor="errorHandling" className="text-sm">
-                      Error Handling: Correctly identified and fixed errors. Verified hallucinated information and/or invalid URLs.
+                      Error Handling: Correctly identified and fixed errors. Verified hallucinated information and/or
+                      invalid URLs.
                     </label>
                   </div>
                   <div className="flex items-center space-x-2">
