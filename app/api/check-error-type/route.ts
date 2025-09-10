@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
   try {
     const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = await request.json()
 
-    const errorAnalysisPrompt = `You are an expert error analysis system. Analyze the following AI interaction and identify specific error types present in the AI response.
+    const errorAnalysisPrompt = `You are an expert error analysis system. Analyze the following AI interaction and identify which specific error categories apply to the AI response. Your task is to classify errors into one or more of the **CATEGORIES** provided below. Only select from the exact items listed in **CATEGORIES**. Do not output the category classes (e.g., "Tool Usage Errors", "Parameter Errors"); only the items.
 
 SYSTEM PROMPT:
 ${systemPrompt}
@@ -23,39 +23,50 @@ ${toolOutput}
 AI RESPONSE:
 ${aiResponse}
 
-Please analyze the AI response and identify any errors. Focus on these common error categories:
+CATEGORIES (use only these in your output):
+- Wrong_tool_selected
+- No_tool_triggered
+- Tool_over_triggered
+- Wrong_param_value
+- Required_param_missing
+- Extra_param_predicted
+- Param_not_defined
+- Param_type_inconsistent
+- Enum_not_respected
+- Parallel_calls_missing
+- Unsatisfactory_summary
+- Tool_call_not_parsable
+- Others
+- no_issues
 
-1. **Factual Errors** - Incorrect information, false claims, or inaccurate data
-2. **Logical Errors** - Flawed reasoning, contradictions, or illogical conclusions
-3. **Format Errors** - Incorrect response format, missing required elements, or structural issues
-4. **Tool Usage Errors** - Incorrect tool calls, misinterpreted tool outputs, or missing tool usage
-5. **Context Errors** - Misunderstanding user intent, ignoring context, or irrelevant responses
-6. **Safety Errors** - Harmful content, inappropriate responses, or policy violations
-7. **Completeness Errors** - Incomplete answers, missing information, or partial responses
-8. **Consistency Errors** - Contradictory statements, inconsistent tone, or conflicting information
+Instructions:
+1. Examine the AI response in relation to the system prompt, user prompt, tool call, and tool output.  
+2. Determine if any of the error categories listed above apply. If none apply, select **no_issues**.  
+3. For each identified error, provide:
+   - 'type': The exact category name from CATEGORIES.
+   - 'severity': One of Low, Medium, High, or Critical.
+   - 'description': A clear explanation of the error.
+   - 'examples': One or more specific excerpts from the AI response that illustrate the error.
+   - 'location': Where in the AI response or tool call/output the error occurs.
+4. Provide actionable 'recommendations' to avoid or fix the errors.
+5. Write a short 'summary' describing the overall error patterns and severity.
 
-For each error found, provide:
-- Error type and severity (Low/Medium/High/Critical)
-- Description of the error
-- Specific examples from the response
-- Recommendations for improvement
-
-IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not include any other text before or after the JSON:
+IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not include any text before or after the JSON:
 
 {
   "errorCount": 0,
   "errorTypes": [
     {
-      "type": "Error Type Name",
-      "severity": "Low|Medium|High|Critical",
-      "description": "Detailed description of the error",
-      "examples": ["Specific example 1", "Specific example 2"],
-      "location": "Where in the response the error occurs"
+      "type": "Wrong_tool_selected",
+      "severity": "High",
+      "description": "The AI chose an incorrect tool despite context indicating the correct one.",
+      "examples": ["Example excerpt here"],
+      "location": "Section of AI response or tool call"
     }
   ],
   "recommendations": [
-    "Specific recommendation 1",
-    "Specific recommendation 2"
+    "Ensure tool selection is aligned with the system prompt and user intent",
+    "Double-check parameters before finalizing the response"
   ],
   "summary": "Overall assessment of error patterns and severity"
 }`
