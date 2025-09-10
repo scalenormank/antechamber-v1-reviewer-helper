@@ -280,7 +280,7 @@ interface ImageCategoryState {
 export function SystemPromptGenerator() {
   const { toast } = useToast()
 
-  const [activeTab, setActiveTab] = useState("verify")
+  const [activeTab, setActiveTab] = useState("home")
   const [generatedPrompt, setGeneratedPrompt] = useState("")
   const [verificationResult, setVerificationResult] = useState("")
   const [promptSections, setPromptSections] = useState<{ [key: string]: string }>({})
@@ -327,6 +327,8 @@ export function SystemPromptGenerator() {
   })
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [errorTypeResult, setErrorTypeResult] = useState<any>(null)
+  const [isCheckingErrorType, setIsCheckingErrorType] = useState(false)
 
   const [verificationInput, setVerificationInput] = useState(generatedPrompt)
 
@@ -717,6 +719,60 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
     }
   }
 
+  const checkErrorType = async () => {
+    if (!responseCheckerData.systemPrompt || !responseCheckerData.userPrompt || !responseCheckerData.aiResponse) {
+      toast({
+        title: "Missing Required Fields",
+        description: "Please fill in system prompt, user prompt, and AI response before checking error types.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsCheckingErrorType(true)
+    try {
+      const response = await fetch("/api/check-error-type", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(responseCheckerData),
+      })
+
+      if (!response.ok) {
+        throw new Error("Error type analysis failed")
+      }
+
+      const result = await response.json()
+      console.log("[v0] Error type result:", result)
+
+      if (result.error) {
+        throw new Error(result.details || result.error)
+      }
+
+      setErrorTypeResult(result)
+      
+      toast({
+        title: "Error Type Analysis Complete",
+        description: "Error types have been identified and analyzed.",
+      })
+    } catch (error) {
+      console.error("[v0] Error type analysis error:", error)
+      setErrorTypeResult({
+        error: true,
+        message: error instanceof Error ? error.message : "Error type analysis failed",
+      })
+      
+      toast({
+        title: "Error Type Analysis Failed",
+        description: error instanceof Error ? error.message : "Failed to analyze error types",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCheckingErrorType(false)
+    }
+  }
+
   const clearResponseChecker = () => {
     setResponseCheckerData({
       systemPrompt: "",
@@ -726,6 +782,7 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
       aiResponse: "",
     })
     setAnalysisResult(null)
+    setErrorTypeResult(null)
   }
 
   const handleChecklistChange = (item: string) => {
@@ -808,32 +865,68 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
         </div>
       )}
 
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <Bot className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-bold text-foreground">AI System Prompt Generator</h1>
+      {/* Header Section */}
+      <div className="text-center mb-12">
+        <div className="flex items-center justify-center gap-3 mb-6">
+          <Bot className="h-12 w-12 text-primary" />
+          <h1 className="text-4xl font-bold text-foreground">Tool for Anti Chamber</h1>
         </div>
-        <p className="text-muted-foreground text-lg">
+        <p className="text-muted-foreground text-xl max-w-3xl mx-auto">
           Create sophisticated system prompts with advanced complexity principles and verify their effectiveness.
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="verify" className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4" />
-            Verify Prompt
-          </TabsTrigger>
-          <TabsTrigger value="images" className="flex items-center gap-2">
-            <ImageIcon className="h-4 w-4" />
-            Response Checker
-          </TabsTrigger>
-          <TabsTrigger value="checklist" className="flex items-center gap-2">
-            <CheckSquare className="h-4 w-4" />
-            Checklist
-          </TabsTrigger>
-        </TabsList>
+      {/* Main Navigation Buttons */}
+      {activeTab === "home" && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          <Card className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105" onClick={() => setActiveTab("verify")}>
+            <CardContent className="p-8 text-center">
+              <CheckCircle className="h-16 w-16 text-primary mx-auto mb-4" />
+              <h3 className="text-2xl font-bold mb-3">Verify System Prompt</h3>
+              <p className="text-muted-foreground">
+                Analyze existing system prompts for completeness, quality, and effectiveness. Get detailed feedback on prompt structure and components.
+              </p>
+            </CardContent>
+          </Card>
 
+          <Card className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105" onClick={() => setActiveTab("images")}>
+            <CardContent className="p-8 text-center">
+              <ImageIcon className="h-16 w-16 text-primary mx-auto mb-4" />
+              <h3 className="text-2xl font-bold mb-3">Response Checker</h3>
+              <p className="text-muted-foreground">
+                Analyze AI responses by providing system prompts, user prompts, tool calls, and outputs. Evaluate grounding, integrity, and completeness.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105" onClick={() => setActiveTab("checklist")}>
+            <CardContent className="p-8 text-center">
+              <CheckSquare className="h-16 w-16 text-primary mx-auto mb-4" />
+              <h3 className="text-2xl font-bold mb-3">Checklist</h3>
+              <p className="text-muted-foreground">
+                Use the systematic evaluation checklist to track progress across multiple quality dimensions and ensure comprehensive task completion.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Back to Home Button */}
+      {activeTab !== "home" && (
+        <div className="mb-6">
+          <Button 
+            variant="outline" 
+            onClick={() => setActiveTab("home")}
+            className="flex items-center gap-2"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Back to Home
+          </Button>
+        </div>
+      )}
+
+      {/* Tab Content */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsContent value="verify" className="space-y-6">
           <Card>
             <CardHeader>
@@ -967,6 +1060,14 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <Button className="flex-1" onClick={analyzeResponse} disabled={isAnalyzing}>
                     {isAnalyzing ? "Analyzing..." : "Analyze Response"}
                   </Button>
+                  <Button 
+                    variant="secondary" 
+                    className="flex-1" 
+                    onClick={checkErrorType} 
+                    disabled={isCheckingErrorType}
+                  >
+                    {isCheckingErrorType ? "Checking..." : "Check Error Type"}
+                  </Button>
                   <Button variant="outline" className="flex-1 bg-transparent" onClick={clearResponseChecker}>
                     Clear All
                   </Button>
@@ -1091,6 +1192,80 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                           <h4 className="font-medium mb-2">Summary</h4>
                           <p className="text-sm">{analysisResult.summary}</p>
                         </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Error Type Analysis Results Display */}
+              {errorTypeResult && (
+                <Card className="mt-6">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      Error Type Analysis Results
+                      {!errorTypeResult.error && (
+                        <span className="text-sm font-normal bg-orange-100 text-orange-800 px-2 py-1 rounded">
+                          {errorTypeResult.errorCount || 0} Error{errorTypeResult.errorCount !== 1 ? 's' : ''} Found
+                        </span>
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {errorTypeResult.error ? (
+                      <div className="border rounded-lg p-4 bg-red-50">
+                        <h4 className="font-medium text-red-800 mb-2">Analysis Failed</h4>
+                        <p className="text-sm text-red-600">{errorTypeResult.message}</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* Error Types List */}
+                        {errorTypeResult.errorTypes && errorTypeResult.errorTypes.length > 0 && (
+                          <div className="space-y-3">
+                            <h4 className="font-medium text-lg">Identified Error Types:</h4>
+                            {errorTypeResult.errorTypes.map((errorType: any, index: number) => (
+                              <div key={index} className="border rounded-lg p-4 bg-orange-50">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h5 className="font-medium text-orange-800">{errorType.type}</h5>
+                                  <span className="px-2 py-1 bg-orange-200 text-orange-800 text-xs rounded">
+                                    {errorType.severity}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-orange-700 mb-2">{errorType.description}</p>
+                                {errorType.examples && errorType.examples.length > 0 && (
+                                  <div>
+                                    <p className="text-sm font-medium text-orange-800 mb-1">Examples:</p>
+                                    <ul className="text-sm text-orange-700 space-y-1">
+                                      {errorType.examples.map((example: string, exIndex: number) => (
+                                        <li key={exIndex} className="ml-4">• {example}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Recommendations */}
+                        {errorTypeResult.recommendations && errorTypeResult.recommendations.length > 0 && (
+                          <div className="border rounded-lg p-4 bg-blue-50">
+                            <h4 className="font-medium text-blue-800 mb-2">Recommendations:</h4>
+                            <ul className="text-sm text-blue-700 space-y-1">
+                              {errorTypeResult.recommendations.map((rec: string, index: number) => (
+                                <li key={index} className="ml-4">• {rec}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Summary */}
+                        {errorTypeResult.summary && (
+                          <div className="bg-muted/50 rounded-lg p-4">
+                            <h4 className="font-medium mb-2">Summary</h4>
+                            <p className="text-sm">{errorTypeResult.summary}</p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </CardContent>
