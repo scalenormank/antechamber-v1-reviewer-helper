@@ -872,7 +872,7 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
           <h1 className="text-4xl font-bold text-foreground">Tool for Anti Chamber</h1>
         </div>
         <p className="text-muted-foreground text-xl max-w-3xl mx-auto">
-          Create sophisticated system prompts with advanced complexity principles and verify their effectiveness.
+          Advanced tools for AI system prompt analysis and evaluation.
         </p>
       </div>
 
@@ -1061,8 +1061,8 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                     {isAnalyzing ? "Analyzing..." : "Analyze Response"}
                   </Button>
                   <Button 
-                    variant="secondary" 
-                    className="flex-1" 
+                    variant="outline" 
+                    className="flex-1 hover:bg-accent hover:text-accent-foreground" 
                     onClick={checkErrorType} 
                     disabled={isCheckingErrorType}
                   >
