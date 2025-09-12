@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
   try {
     const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = await request.json()
 
-    const analysisPrompt = `You are an AI response analyzer. Analyze the following AI interaction and provide detailed feedback on three key areas:
+    const analysisPrompt = `You are an AI response analyzer. Analyze the following AI interaction and provide detailed feedback on two key areas:
 
 SYSTEM PROMPT:
 ${systemPrompt}
@@ -23,7 +23,7 @@ ${toolOutput}
 AI RESPONSE:
 ${aiResponse}
 
-Please analyze and provide results for these three checks:
+Please analyze and provide results for these two checks:
 
 **1. GROUNDING CHECK**  
 Verify whether every factual statement in the AI response is **supported by either**:  
@@ -37,18 +37,7 @@ The agent must:
 
 ---
 
-**2. SYSTEM PROMPT INTEGRITY CHECK**  
-Evaluate if the tool call, tool output, and response remain consistent with the **instructions, rules, and role constraints** in the system prompt.  
-
-The agent must:  
-- Check whether the tool was called when required and avoided when prohibited.  
-- Verify the AI interpreted the tool output correctly (no misreadings or distortions).  
-- Confirm the response follows role, tone, scope, and format requirements specified by the system prompt.  
-- Flag any violations, omissions, or overreach (e.g., giving advice outside of scope, ignoring constraints, or adding unsupported style).  
-
----
-
-**3. RESPONSE COMPLETENESS CHECK**  
+**2. RESPONSE COMPLETENESS CHECK**  
 Evaluate whether the response fulfills **all explicit and implicit requirements** in the user prompt.  
 
 The agent must:  
@@ -65,18 +54,11 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
     "details": "detailed explanation",
     "issues": ["list of specific issues if any"]
   },
-  "systemPromptIntegrityCheck": {
-    "status": "pass" | "fail" | "warning", 
-    "details": "detailed explanation",
-    "issues": ["list of specific issues if any"]
-  },
   "responseCompletenessCheck": {
     "status": "pass" | "fail" | "warning",
     "details": "detailed explanation", 
     "issues": ["list of specific issues if any"]
-  },
-  "overallScore": 8,
-  "summary": "brief overall assessment"
+  }
 }`
 
     const { text } = await generateText({
@@ -112,7 +94,6 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
       // Validate the structure
       if (
         !analysisResult.groundingCheck ||
-        !analysisResult.systemPromptIntegrityCheck ||
         !analysisResult.responseCompletenessCheck
       ) {
         throw new Error("Invalid response structure")
@@ -124,11 +105,6 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
       // Return a fallback structure
       analysisResult = {
         groundingCheck: {
-          status: "fail",
-          details: "Analysis failed due to parsing error",
-          issues: ["Could not parse AI response"],
-        },
-        systemPromptIntegrityCheck: {
           status: "fail",
           details: "Analysis failed due to parsing error",
           issues: ["Could not parse AI response"],

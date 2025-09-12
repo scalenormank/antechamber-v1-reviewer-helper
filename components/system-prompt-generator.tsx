@@ -566,25 +566,49 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
       const textarea = document.getElementById("verification-input") as HTMLTextAreaElement
       const promptToVerify = textarea?.value || verificationInput
 
-      const response = await fetch("/api/verify-prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: promptToVerify }),
-      })
+      // Run both verification analyses in parallel
+      const [verificationResponse, contradictionResponse] = await Promise.all([
+        fetch("/api/verify-prompt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: promptToVerify }),
+        }),
+        fetch("/api/check-contradictions-banned", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: promptToVerify }),
+        })
+      ])
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        console.error("[v0] API Error Response:", data)
-        throw new Error(`API request failed: ${response.status} - ${data.error || "Unknown error"}`)
+      if (!verificationResponse.ok || !contradictionResponse.ok) {
+        throw new Error("Verification failed")
       }
 
-      if (!data.evaluation) {
+      const [verificationData, contradictionData] = await Promise.all([
+        verificationResponse.json(),
+        contradictionResponse.json()
+      ])
+
+      console.log("[v0] Combined verification result:", { verificationData, contradictionData })
+
+      if (!verificationData.evaluation) {
         throw new Error("Invalid response structure: missing evaluation")
       }
 
-      setVerificationResult(data.evaluation)
-      setPromptSections({})
+      // Combine the results into a unified structure
+      const combinedResult = {
+        evaluation: verificationData.evaluation,
+        sections: verificationData.sections || {},
+        contradictions: contradictionData || {
+          has_contradictions: "no",
+          contradictions_list: [],
+          has_banned_content: "no",
+          banned_content_list: []
+        }
+      }
+
+      setVerificationResult(combinedResult)
+      setPromptSections(combinedResult.sections)
 
       toast({
         title: "Verification Complete",
@@ -719,56 +743,84 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
     }
   }
 
-  const checkErrorType = async () => {
+  const checkResponse = async () => {
     if (!responseCheckerData.systemPrompt || !responseCheckerData.userPrompt || !responseCheckerData.aiResponse) {
       toast({
         title: "Missing Required Fields",
-        description: "Please fill in system prompt, user prompt, and AI response before checking error types.",
+        description: "Please fill in system prompt, user prompt, and AI response before checking.",
         variant: "destructive",
       })
       return
     }
 
+    setIsAnalyzing(true)
     setIsCheckingErrorType(true)
+    
     try {
-      const response = await fetch("/api/check-error-type", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(responseCheckerData),
-      })
+      // Run three analyses in parallel
+      const [analysisResponse, errorTypeResponse, integrityResponse] = await Promise.all([
+        fetch("/api/analyze-response", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(responseCheckerData),
+        }),
+        fetch("/api/check-error-type", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(responseCheckerData),
+        }),
+        fetch("/api/check-system-prompt-integrity", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(responseCheckerData),
+        })
+      ])
 
-      if (!response.ok) {
-        throw new Error("Error type analysis failed")
+      if (!analysisResponse.ok || !errorTypeResponse.ok || !integrityResponse.ok) {
+        throw new Error("Analysis failed")
       }
 
-      const result = await response.json()
-      console.log("[v0] Error type result:", result)
+      const [analysisResult, errorTypeResult, integrityResult] = await Promise.all([
+        analysisResponse.json(),
+        errorTypeResponse.json(),
+        integrityResponse.json()
+      ])
 
-      if (result.error) {
-        throw new Error(result.details || result.error)
+      console.log("[v0] Combined analysis result:", { analysisResult, errorTypeResult, integrityResult })
+
+      // Combine the results into a unified structure
+      const combinedResult = {
+        grounding: analysisResult.groundingCheck || { status: "fail", details: "Analysis failed", issues: [] },
+        systemPromptContradictions: integrityResult || { status: "fail", details: "Analysis failed", issues: [] },
+        responseCompleteness: analysisResult.responseCompletenessCheck || { status: "fail", details: "Analysis failed", issues: [] },
+        possibleErrors: errorTypeResult.error || errorTypeResult.errorCount === 0 ? 
+          { status: "pass", details: "No errors found", errorTypes: [] } :
+          { status: "fail", details: `${errorTypeResult.errorCount} errors found`, errorTypes: errorTypeResult.errorTypes || [] },
+        overallScore: analysisResult.overallScore || 0,
+        summary: analysisResult.summary || "Analysis completed"
       }
 
-      setErrorTypeResult(result)
+      setAnalysisResult(combinedResult)
+      setErrorTypeResult(null) // Clear the old error type result since it's now combined
       
       toast({
-        title: "Error Type Analysis Complete",
-        description: "Error types have been identified and analyzed.",
+        title: "Response Analysis Complete",
+        description: "Comprehensive analysis has been completed successfully.",
       })
     } catch (error) {
-      console.error("[v0] Error type analysis error:", error)
-      setErrorTypeResult({
+      console.error("[v0] Combined analysis error:", error)
+      setAnalysisResult({
         error: true,
-        message: error instanceof Error ? error.message : "Error type analysis failed",
+        message: error instanceof Error ? error.message : "Analysis failed",
       })
       
       toast({
-        title: "Error Type Analysis Failed",
-        description: error instanceof Error ? error.message : "Failed to analyze error types",
+        title: "Analysis Failed",
+        description: error instanceof Error ? error.message : "Failed to analyze response",
         variant: "destructive",
       })
     } finally {
+      setIsAnalyzing(false)
       setIsCheckingErrorType(false)
     }
   }
@@ -965,16 +1017,98 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
               </Button>
 
               {verificationResult && (
-                <Card className="mt-6">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Verification Results</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="prose max-w-none">
-                      <div className="whitespace-pre-wrap text-sm leading-relaxed">{verificationResult}</div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div className="space-y-6 mt-6">
+                  {/* Main Verification Results */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Verification Results</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="prose max-w-none">
+                        <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                          {typeof verificationResult === 'string' ? verificationResult : verificationResult.evaluation}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Contradictions and Banned Content Check */}
+                  {typeof verificationResult === 'object' && verificationResult.contradictions && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          Contradictions & Banned Content Check
+                          {(verificationResult.contradictions.has_contradictions === "yes" || verificationResult.contradictions.has_banned_content === "yes") && (
+                            <span className="text-sm font-normal bg-red-100 text-red-800 px-2 py-1 rounded">
+                              Issues Found
+                            </span>
+                          )}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* Contradictions Check */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-medium">Contradictions Check</h4>
+                            <span
+                              className={`px-2 py-1 rounded text-xs ${
+                                verificationResult.contradictions.has_contradictions === "yes"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-green-100 text-green-800"
+                              }`}
+                            >
+                              {verificationResult.contradictions.has_contradictions === "yes" ? "FOUND" : "CLEAN"}
+                            </span>
+                          </div>
+                          {verificationResult.contradictions.has_contradictions === "yes" ? (
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-2">The following contradictions were found:</p>
+                              <ul className="text-sm space-y-1">
+                                {verificationResult.contradictions.contradictions_list.map((contradiction: string, index: number) => (
+                                  <li key={index} className="text-red-600 bg-red-50 p-2 rounded border-l-4 border-red-300">
+                                    • "{contradiction}"
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-green-700">No contradictions found in the system prompt.</p>
+                          )}
+                        </div>
+
+                        {/* Banned Content Check */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-medium">Banned Content Check</h4>
+                            <span
+                              className={`px-2 py-1 rounded text-xs ${
+                                verificationResult.contradictions.has_banned_content === "yes"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-green-100 text-green-800"
+                              }`}
+                            >
+                              {verificationResult.contradictions.has_banned_content === "yes" ? "FOUND" : "CLEAN"}
+                            </span>
+                          </div>
+                          {verificationResult.contradictions.has_banned_content === "yes" ? (
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-2">The following banned content was found:</p>
+                              <ul className="text-sm space-y-1">
+                                {verificationResult.contradictions.banned_content_list.map((bannedContent: string, index: number) => (
+                                  <li key={index} className="text-red-600 bg-red-50 p-2 rounded border-l-4 border-red-300">
+                                    • "{bannedContent}"
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-green-700">No banned content found in the system prompt.</p>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -1057,16 +1191,8 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                 </div>
 
                 <div className="flex gap-3 pt-4">
-                  <Button className="flex-1" onClick={analyzeResponse} disabled={isAnalyzing}>
-                    {isAnalyzing ? "Analyzing..." : "Analyze Response"}
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    className="flex-1 hover:bg-accent hover:text-accent-foreground" 
-                    onClick={checkErrorType} 
-                    disabled={isCheckingErrorType}
-                  >
-                    {isCheckingErrorType ? "Checking..." : "Check Error Type"}
+                  <Button className="flex-1" onClick={checkResponse} disabled={isAnalyzing || isCheckingErrorType}>
+                    {isAnalyzing || isCheckingErrorType ? "Checking Response..." : "Check Response"}
                   </Button>
                   <Button variant="outline" className="flex-1 bg-transparent" onClick={clearResponseChecker}>
                     Clear All
@@ -1074,12 +1200,12 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                 </div>
               </div>
 
-              {/* Analysis Results Display */}
+              {/* Unified Analysis Results Display */}
               {analysisResult && (
                 <Card className="mt-6">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      Analysis Results
+                      Response Analysis Results
                       {!analysisResult.error && (
                         <span className="text-sm font-normal bg-primary/10 px-2 py-1 rounded">
                           Score: {analysisResult.overallScore}/10
@@ -1098,23 +1224,23 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                         {/* Grounding Check */}
                         <div className="border rounded-lg p-4">
                           <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-medium">Grounding Check</h4>
+                            <h4 className="font-medium">Grounding</h4>
                             <span
                               className={`px-2 py-1 rounded text-xs ${
-                                analysisResult.groundingCheck.status === "pass"
+                                analysisResult.grounding.status === "pass"
                                   ? "bg-green-100 text-green-800"
-                                  : analysisResult.groundingCheck.status === "warning"
+                                  : analysisResult.grounding.status === "warning"
                                     ? "bg-yellow-100 text-yellow-800"
                                     : "bg-red-100 text-red-800"
                               }`}
                             >
-                              {analysisResult.groundingCheck.status.toUpperCase()}
+                              {analysisResult.grounding.status.toUpperCase()}
                             </span>
                           </div>
-                          <p className="text-sm text-muted-foreground mb-2">{analysisResult.groundingCheck.details}</p>
-                          {analysisResult.groundingCheck.issues && analysisResult.groundingCheck.issues.length > 0 && (
+                          <p className="text-sm text-muted-foreground mb-2">{analysisResult.grounding.details}</p>
+                          {analysisResult.grounding.issues && analysisResult.grounding.issues.length > 0 && (
                             <ul className="text-sm space-y-1">
-                              {analysisResult.groundingCheck.issues.map((issue: string, index: number) => (
+                              {analysisResult.grounding.issues.map((issue: string, index: number) => (
                                 <li key={index} className="text-red-600">
                                   • {issue}
                                 </li>
@@ -1123,29 +1249,29 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                           )}
                         </div>
 
-                        {/* System Prompt Integrity Check */}
+                        {/* System Prompt Contradictions */}
                         <div className="border rounded-lg p-4">
                           <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-medium">System Prompt Integrity</h4>
+                            <h4 className="font-medium">System Prompt Contradictions</h4>
                             <span
                               className={`px-2 py-1 rounded text-xs ${
-                                analysisResult.systemPromptIntegrityCheck.status === "pass"
+                                analysisResult.systemPromptContradictions.status === "pass"
                                   ? "bg-green-100 text-green-800"
-                                  : analysisResult.systemPromptIntegrityCheck.status === "warning"
+                                  : analysisResult.systemPromptContradictions.status === "warning"
                                     ? "bg-yellow-100 text-yellow-800"
                                     : "bg-red-100 text-red-800"
                               }`}
                             >
-                              {analysisResult.systemPromptIntegrityCheck.status.toUpperCase()}
+                              {analysisResult.systemPromptContradictions.status.toUpperCase()}
                             </span>
                           </div>
                           <p className="text-sm text-muted-foreground mb-2">
-                            {analysisResult.systemPromptIntegrityCheck.details}
+                            {analysisResult.systemPromptContradictions.details}
                           </p>
-                          {analysisResult.systemPromptIntegrityCheck.issues &&
-                            analysisResult.systemPromptIntegrityCheck.issues.length > 0 && (
+                          {analysisResult.systemPromptContradictions.issues &&
+                            analysisResult.systemPromptContradictions.issues.length > 0 && (
                               <ul className="text-sm space-y-1">
-                                {analysisResult.systemPromptIntegrityCheck.issues.map(
+                                {analysisResult.systemPromptContradictions.issues.map(
                                   (issue: string, index: number) => (
                                     <li key={index} className="text-red-600">
                                       • {issue}
@@ -1156,35 +1282,79 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                             )}
                         </div>
 
-                        {/* Response Completeness Check */}
+                        {/* Response Completeness */}
                         <div className="border rounded-lg p-4">
                           <div className="flex items-center gap-2 mb-2">
                             <h4 className="font-medium">Response Completeness</h4>
                             <span
                               className={`px-2 py-1 rounded text-xs ${
-                                analysisResult.responseCompletenessCheck.status === "pass"
+                                analysisResult.responseCompleteness.status === "pass"
                                   ? "bg-green-100 text-green-800"
-                                  : analysisResult.responseCompletenessCheck.status === "warning"
+                                  : analysisResult.responseCompleteness.status === "warning"
                                     ? "bg-yellow-100 text-yellow-800"
                                     : "bg-red-100 text-red-800"
                               }`}
                             >
-                              {analysisResult.responseCompletenessCheck.status.toUpperCase()}
+                              {analysisResult.responseCompleteness.status.toUpperCase()}
                             </span>
                           </div>
                           <p className="text-sm text-muted-foreground mb-2">
-                            {analysisResult.responseCompletenessCheck.details}
+                            {analysisResult.responseCompleteness.details}
                           </p>
-                          {analysisResult.responseCompletenessCheck.issues &&
-                            analysisResult.responseCompletenessCheck.issues.length > 0 && (
+                          {analysisResult.responseCompleteness.issues &&
+                            analysisResult.responseCompleteness.issues.length > 0 && (
                               <ul className="text-sm space-y-1">
-                                {analysisResult.responseCompletenessCheck.issues.map((issue: string, index: number) => (
+                                {analysisResult.responseCompleteness.issues.map((issue: string, index: number) => (
                                   <li key={index} className="text-red-600">
                                     • {issue}
                                   </li>
                                 ))}
                               </ul>
                             )}
+                        </div>
+
+                        {/* Possible Errors Found */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-medium">Possible Errors Found</h4>
+                            <span
+                              className={`px-2 py-1 rounded text-xs ${
+                                analysisResult.possibleErrors.status === "pass"
+                                  ? "bg-green-100 text-green-800"
+                                  : "bg-orange-100 text-orange-800"
+                              }`}
+                            >
+                              {analysisResult.possibleErrors.status.toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mb-2">
+                            {analysisResult.possibleErrors.details}
+                          </p>
+                          {analysisResult.possibleErrors.errorTypes && analysisResult.possibleErrors.errorTypes.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              {analysisResult.possibleErrors.errorTypes.map((errorType: any, index: number) => (
+                                <div key={index} className="bg-orange-50 border border-orange-200 rounded p-3">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h5 className="font-medium text-orange-800 text-sm">{errorType.type}</h5>
+                                    <span className="px-2 py-1 bg-orange-200 text-orange-800 text-xs rounded">
+                                      {errorType.severity}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-orange-700">{errorType.description}</p>
+                                  {errorType.examples && errorType.examples.length > 0 && (
+                                    <div className="mt-2">
+                                      <p className="text-xs font-medium text-orange-800 mb-1">Examples:</p>
+                                      <ul className="text-xs text-orange-700 space-y-1">
+                                        {errorType.examples.map((example: string, exIndex: number) => (
+                                          <li key={exIndex} className="ml-2">• {example}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Overall Summary */}
@@ -1198,79 +1368,6 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                 </Card>
               )}
 
-              {/* Error Type Analysis Results Display */}
-              {errorTypeResult && (
-                <Card className="mt-6">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      Error Type Analysis Results
-                      {!errorTypeResult.error && (
-                        <span className="text-sm font-normal bg-orange-100 text-orange-800 px-2 py-1 rounded">
-                          {errorTypeResult.errorCount || 0} Error{errorTypeResult.errorCount !== 1 ? 's' : ''} Found
-                        </span>
-                      )}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {errorTypeResult.error ? (
-                      <div className="border rounded-lg p-4 bg-red-50">
-                        <h4 className="font-medium text-red-800 mb-2">Analysis Failed</h4>
-                        <p className="text-sm text-red-600">{errorTypeResult.message}</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {/* Error Types List */}
-                        {errorTypeResult.errorTypes && errorTypeResult.errorTypes.length > 0 && (
-                          <div className="space-y-3">
-                            <h4 className="font-medium text-lg">Identified Error Types:</h4>
-                            {errorTypeResult.errorTypes.map((errorType: any, index: number) => (
-                              <div key={index} className="border rounded-lg p-4 bg-orange-50">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <h5 className="font-medium text-orange-800">{errorType.type}</h5>
-                                  <span className="px-2 py-1 bg-orange-200 text-orange-800 text-xs rounded">
-                                    {errorType.severity}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-orange-700 mb-2">{errorType.description}</p>
-                                {errorType.examples && errorType.examples.length > 0 && (
-                                  <div>
-                                    <p className="text-sm font-medium text-orange-800 mb-1">Examples:</p>
-                                    <ul className="text-sm text-orange-700 space-y-1">
-                                      {errorType.examples.map((example: string, exIndex: number) => (
-                                        <li key={exIndex} className="ml-4">• {example}</li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Recommendations */}
-                        {errorTypeResult.recommendations && errorTypeResult.recommendations.length > 0 && (
-                          <div className="border rounded-lg p-4 bg-blue-50">
-                            <h4 className="font-medium text-blue-800 mb-2">Recommendations:</h4>
-                            <ul className="text-sm text-blue-700 space-y-1">
-                              {errorTypeResult.recommendations.map((rec: string, index: number) => (
-                                <li key={index} className="ml-4">• {rec}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {/* Summary */}
-                        {errorTypeResult.summary && (
-                          <div className="bg-muted/50 rounded-lg p-4">
-                            <h4 className="font-medium mb-2">Summary</h4>
-                            <p className="text-sm">{errorTypeResult.summary}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
             </CardContent>
           </Card>
         </TabsContent>
