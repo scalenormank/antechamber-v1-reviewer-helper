@@ -1,27 +1,47 @@
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 import { type NextRequest, NextResponse } from "next/server"
+import { validateApiRequest, sanitizeForPrompt } from "@/lib/input-validation"
 
 export async function POST(request: NextRequest) {
   try {
-    const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = await request.json()
+    const body = await request.json()
+    
+    // Validate and sanitize input
+    const validation = validateApiRequest(
+      body,
+      ['systemPrompt', 'userPrompt', 'toolCall', 'toolOutput', 'aiResponse'],
+      request.headers.get('x-forwarded-for') || 'anonymous'
+    )
+
+    if (!validation.isValid) {
+      return NextResponse.json(
+        { 
+          error: "Input validation failed", 
+          details: validation.errors 
+        }, 
+        { status: 400 }
+      )
+    }
+
+    const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = validation.sanitizedBody
 
     const analysisPrompt = `You are an AI response analyzer. Analyze the following AI interaction and provide detailed feedback on two key areas:
 
 SYSTEM PROMPT:
-${systemPrompt}
+${sanitizeForPrompt(systemPrompt)}
 
 USER PROMPT:
-${userPrompt}
+${sanitizeForPrompt(userPrompt)}
 
 TOOL CALL:
-${toolCall}
+${sanitizeForPrompt(toolCall)}
 
 TOOL OUTPUT:
-${toolOutput}
+${sanitizeForPrompt(toolOutput)}
 
 AI RESPONSE:
-${aiResponse}
+${sanitizeForPrompt(aiResponse)}
 
 Please analyze and provide results for these two checks:
 

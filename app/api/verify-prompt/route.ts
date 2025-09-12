@@ -1,13 +1,28 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { validateApiRequest, sanitizeForPrompt } from "@/lib/input-validation"
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { prompt } = body
+    
+    // Validate and sanitize input
+    const validation = validateApiRequest(
+      body,
+      ['prompt'],
+      request.headers.get('x-forwarded-for') || 'anonymous'
+    )
 
-    if (!prompt || typeof prompt !== "string") {
-      return NextResponse.json({ error: "Prompt is required and must be a string" }, { status: 400 })
+    if (!validation.isValid) {
+      return NextResponse.json(
+        { 
+          error: "Input validation failed", 
+          details: validation.errors 
+        }, 
+        { status: 400 }
+      )
     }
+
+    const { prompt } = validation.sanitizedBody
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -91,7 +106,7 @@ IMPORTANT: Return ONLY a valid JSON object with "analysis" (the complete verific
             `Analyze this system prompt and categorize its components according to the evaluation categories, AND extract the 7 required sections:
 
 **SYSTEM PROMPT TO ANALYZE:**
-${prompt}
+${sanitizeForPrompt(prompt)}
 
 Return ONLY a JSON object with the analysis and sections. No other text.`,
           

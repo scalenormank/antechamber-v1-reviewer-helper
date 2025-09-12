@@ -1,27 +1,47 @@
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 import { type NextRequest, NextResponse } from "next/server"
+import { validateApiRequest, sanitizeForPrompt } from "@/lib/input-validation"
 
 export async function POST(request: NextRequest) {
   try {
-    const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = await request.json()
+    const body = await request.json()
+    
+    // Validate and sanitize input
+    const validation = validateApiRequest(
+      body,
+      ['systemPrompt', 'userPrompt', 'toolCall', 'toolOutput', 'aiResponse'],
+      request.headers.get('x-forwarded-for') || 'anonymous'
+    )
+
+    if (!validation.isValid) {
+      return NextResponse.json(
+        { 
+          error: "Input validation failed", 
+          details: validation.errors 
+        }, 
+        { status: 400 }
+      )
+    }
+
+    const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = validation.sanitizedBody
 
     const errorAnalysisPrompt = `You are an expert error analysis system. Analyze the following AI interaction and identify which specific error categories apply to the AI response. Your task is to classify errors into one or more of the **CATEGORIES** provided below. Only select from the exact items listed in **CATEGORIES**. Do not output the category classes (e.g., "Tool Usage Errors", "Parameter Errors"); only the items.
 
 SYSTEM PROMPT:
-${systemPrompt}
+${sanitizeForPrompt(systemPrompt)}
 
 USER PROMPT:
-${userPrompt}
+${sanitizeForPrompt(userPrompt)}
 
 TOOL CALL:
-${toolCall}
+${sanitizeForPrompt(toolCall)}
 
 TOOL OUTPUT:
-${toolOutput}
+${sanitizeForPrompt(toolOutput)}
 
 AI RESPONSE:
-${aiResponse}
+${sanitizeForPrompt(aiResponse)}
 
 CATEGORIES (use only these in your output):
 - Wrong_tool_selected

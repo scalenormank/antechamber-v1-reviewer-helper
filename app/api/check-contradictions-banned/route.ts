@@ -1,14 +1,30 @@
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 import { type NextRequest, NextResponse } from "next/server"
+import { validateApiRequest, sanitizeForPrompt } from "@/lib/input-validation"
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt } = await request.json()
+    const body = await request.json()
+    
+    // Validate and sanitize input
+    const validation = validateApiRequest(
+      body,
+      ['prompt'],
+      request.headers.get('x-forwarded-for') || 'anonymous'
+    )
 
-    if (!prompt || typeof prompt !== "string") {
-      return NextResponse.json({ error: "Prompt is required and must be a string" }, { status: 400 })
+    if (!validation.isValid) {
+      return NextResponse.json(
+        { 
+          error: "Input validation failed", 
+          details: validation.errors 
+        }, 
+        { status: 400 }
+      )
     }
+
+    const { prompt } = validation.sanitizedBody
 
     const contradictionAnalysisPrompt = `You are a specialized system prompt evaluator designed to strictly analyze system prompts for **contradictions** and **banned content**.  
 
@@ -55,7 +71,7 @@ Your task is to read the entire provided system prompt and return a structured J
 Do not include any explanation outside of the JSON object. Only return the JSON as the final output.
 
 **SYSTEM PROMPT TO ANALYZE:**
-${prompt}`
+${sanitizeForPrompt(prompt)}`
 
     const { text } = await generateText({
       model: openai("gpt-4o"),
