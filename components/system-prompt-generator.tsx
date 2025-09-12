@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Bot, CheckCircle, ImageIcon, X, CheckSquare, RotateCcw, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { SecureTextArea, SecureContentDisplay } from "@/components/secure-content-display"
 
 const TOOL_CATEGORIES = {
   "Device & System Control": [
@@ -280,7 +281,7 @@ interface ImageCategoryState {
 export function SystemPromptGenerator() {
   const { toast } = useToast()
 
-  const [activeTab, setActiveTab] = useState("verify")
+  const [activeTab, setActiveTab] = useState("home")
   const [generatedPrompt, setGeneratedPrompt] = useState("")
   const [verificationResult, setVerificationResult] = useState("")
   const [promptSections, setPromptSections] = useState<{ [key: string]: string }>({})
@@ -327,6 +328,8 @@ export function SystemPromptGenerator() {
   })
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [errorTypeResult, setErrorTypeResult] = useState<any>(null)
+  const [isCheckingErrorType, setIsCheckingErrorType] = useState(false)
 
   const [verificationInput, setVerificationInput] = useState(generatedPrompt)
 
@@ -564,25 +567,49 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
       const textarea = document.getElementById("verification-input") as HTMLTextAreaElement
       const promptToVerify = textarea?.value || verificationInput
 
-      const response = await fetch("/api/verify-prompt", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: promptToVerify }),
-      })
+      // Run both verification analyses in parallel
+      const [verificationResponse, contradictionResponse] = await Promise.all([
+        fetch("/api/verify-prompt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: promptToVerify }),
+        }),
+        fetch("/api/check-contradictions-banned", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: promptToVerify }),
+        })
+      ])
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        console.error("[v0] API Error Response:", data)
-        throw new Error(`API request failed: ${response.status} - ${data.error || "Unknown error"}`)
+      if (!verificationResponse.ok || !contradictionResponse.ok) {
+        throw new Error("Verification failed")
       }
 
-      if (!data.evaluation) {
+      const [verificationData, contradictionData] = await Promise.all([
+        verificationResponse.json(),
+        contradictionResponse.json()
+      ])
+
+      console.log("[v0] Combined verification result:", { verificationData, contradictionData })
+
+      if (!verificationData.evaluation) {
         throw new Error("Invalid response structure: missing evaluation")
       }
 
-      setVerificationResult(data.evaluation)
-      setPromptSections({})
+      // Combine the results into a unified structure
+      const combinedResult = {
+        evaluation: verificationData.evaluation,
+        sections: verificationData.sections || {},
+        contradictions: contradictionData || {
+          has_contradictions: "no",
+          contradictions_list: [],
+          has_banned_content: "no",
+          banned_content_list: []
+        }
+      }
+
+      setVerificationResult(combinedResult)
+      setPromptSections(combinedResult.sections)
 
       toast({
         title: "Verification Complete",
@@ -717,6 +744,88 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
     }
   }
 
+  const checkResponse = async () => {
+    if (!responseCheckerData.systemPrompt || !responseCheckerData.userPrompt || !responseCheckerData.aiResponse) {
+      toast({
+        title: "Missing Required Fields",
+        description: "Please fill in system prompt, user prompt, and AI response before checking.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsAnalyzing(true)
+    setIsCheckingErrorType(true)
+    
+    try {
+      // Run three analyses in parallel
+      const [analysisResponse, errorTypeResponse, integrityResponse] = await Promise.all([
+        fetch("/api/analyze-response", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(responseCheckerData),
+        }),
+        fetch("/api/check-error-type", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(responseCheckerData),
+        }),
+        fetch("/api/check-system-prompt-integrity", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(responseCheckerData),
+        })
+      ])
+
+      if (!analysisResponse.ok || !errorTypeResponse.ok || !integrityResponse.ok) {
+        throw new Error("Analysis failed")
+      }
+
+      const [analysisResult, errorTypeResult, integrityResult] = await Promise.all([
+        analysisResponse.json(),
+        errorTypeResponse.json(),
+        integrityResponse.json()
+      ])
+
+      console.log("[v0] Combined analysis result:", { analysisResult, errorTypeResult, integrityResult })
+
+      // Combine the results into a unified structure
+      const combinedResult = {
+        grounding: analysisResult.groundingCheck || { status: "fail", details: "Analysis failed", issues: [] },
+        systemPromptContradictions: integrityResult || { status: "fail", details: "Analysis failed", issues: [] },
+        responseCompleteness: analysisResult.responseCompletenessCheck || { status: "fail", details: "Analysis failed", issues: [] },
+        possibleErrors: errorTypeResult.error || errorTypeResult.errorCount === 0 ? 
+          { status: "pass", details: "No errors found", errorTypes: [] } :
+          { status: "fail", details: `${errorTypeResult.errorCount} errors found`, errorTypes: errorTypeResult.errorTypes || [] },
+        overallScore: analysisResult.overallScore || 0,
+        summary: analysisResult.summary || "Analysis completed"
+      }
+
+      setAnalysisResult(combinedResult)
+      setErrorTypeResult(null) // Clear the old error type result since it's now combined
+      
+      toast({
+        title: "Response Analysis Complete",
+        description: "Comprehensive analysis has been completed successfully.",
+      })
+    } catch (error) {
+      console.error("[v0] Combined analysis error:", error)
+      setAnalysisResult({
+        error: true,
+        message: error instanceof Error ? error.message : "Analysis failed",
+      })
+      
+      toast({
+        title: "Analysis Failed",
+        description: error instanceof Error ? error.message : "Failed to analyze response",
+        variant: "destructive",
+      })
+    } finally {
+      setIsAnalyzing(false)
+      setIsCheckingErrorType(false)
+    }
+  }
+
   const clearResponseChecker = () => {
     setResponseCheckerData({
       systemPrompt: "",
@@ -726,6 +835,7 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
       aiResponse: "",
     })
     setAnalysisResult(null)
+    setErrorTypeResult(null)
   }
 
   const handleChecklistChange = (item: string) => {
@@ -808,32 +918,68 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
         </div>
       )}
 
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <Bot className="h-8 w-8 text-primary" />
-          <h1 className="text-3xl font-bold text-foreground">AI System Prompt Generator</h1>
+      {/* Header Section */}
+      <div className="text-center mb-12">
+        <div className="flex items-center justify-center gap-3 mb-6">
+          <Bot className="h-12 w-12 text-primary" />
+          <h1 className="text-4xl font-bold text-foreground">Tool for Anti Chamber</h1>
         </div>
-        <p className="text-muted-foreground text-lg">
-          Create sophisticated system prompts with advanced complexity principles and verify their effectiveness.
+        <p className="text-muted-foreground text-xl max-w-3xl mx-auto">
+          Advanced tools for AI system prompt analysis and evaluation.
         </p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="verify" className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4" />
-            Verify Prompt
-          </TabsTrigger>
-          <TabsTrigger value="images" className="flex items-center gap-2">
-            <ImageIcon className="h-4 w-4" />
-            Response Checker
-          </TabsTrigger>
-          <TabsTrigger value="checklist" className="flex items-center gap-2">
-            <CheckSquare className="h-4 w-4" />
-            Checklist
-          </TabsTrigger>
-        </TabsList>
+      {/* Main Navigation Buttons */}
+      {activeTab === "home" && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          <Card className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105" onClick={() => setActiveTab("verify")}>
+            <CardContent className="p-8 text-center">
+              <CheckCircle className="h-16 w-16 text-primary mx-auto mb-4" />
+              <h3 className="text-2xl font-bold mb-3">Verify System Prompt</h3>
+              <p className="text-muted-foreground">
+                Analyze existing system prompts for completeness, quality, and effectiveness. Get detailed feedback on prompt structure and components.
+              </p>
+            </CardContent>
+          </Card>
 
+          <Card className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105" onClick={() => setActiveTab("images")}>
+            <CardContent className="p-8 text-center">
+              <ImageIcon className="h-16 w-16 text-primary mx-auto mb-4" />
+              <h3 className="text-2xl font-bold mb-3">Response Checker</h3>
+              <p className="text-muted-foreground">
+                Analyze AI responses by providing system prompts, user prompts, tool calls, and outputs. Evaluate grounding, integrity, and completeness.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="cursor-pointer hover:shadow-lg transition-all duration-200 hover:scale-105" onClick={() => setActiveTab("checklist")}>
+            <CardContent className="p-8 text-center">
+              <CheckSquare className="h-16 w-16 text-primary mx-auto mb-4" />
+              <h3 className="text-2xl font-bold mb-3">Checklist</h3>
+              <p className="text-muted-foreground">
+                Use the systematic evaluation checklist to track progress across multiple quality dimensions and ensure comprehensive task completion.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Back to Home Button */}
+      {activeTab !== "home" && (
+        <div className="mb-6">
+          <Button 
+            variant="outline" 
+            onClick={() => setActiveTab("home")}
+            className="flex items-center gap-2"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Back to Home
+          </Button>
+        </div>
+      )}
+
+      {/* Tab Content */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsContent value="verify" className="space-y-6">
           <Card>
             <CardHeader>
@@ -848,12 +994,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                 <label htmlFor="verification-input" className="block text-sm font-medium mb-2">
                   System Prompt to Verify
                 </label>
-                <textarea
+                <SecureTextArea
                   id="verification-input"
                   value={verificationInput}
-                  onChange={(e) => setVerificationInput(e.target.value)}
+                  onChange={setVerificationInput}
                   placeholder="Paste your system prompt here for verification..."
                   className="w-full min-h-[200px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
+                  rows={8}
                 />
               </div>
 
@@ -872,16 +1019,98 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
               </Button>
 
               {verificationResult && (
-                <Card className="mt-6">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Verification Results</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="prose max-w-none">
-                      <div className="whitespace-pre-wrap text-sm leading-relaxed">{verificationResult}</div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div className="space-y-6 mt-6">
+                  {/* Main Verification Results */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Verification Results</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="prose max-w-none">
+                        <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                          {typeof verificationResult === 'string' ? verificationResult : verificationResult.evaluation}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Contradictions and Banned Content Check */}
+                  {typeof verificationResult === 'object' && verificationResult.contradictions && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          Contradictions & Banned Content Check
+                          {(verificationResult.contradictions.has_contradictions === "yes" || verificationResult.contradictions.has_banned_content === "yes") && (
+                            <span className="text-sm font-normal bg-red-100 text-red-800 px-2 py-1 rounded">
+                              Issues Found
+                            </span>
+                          )}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* Contradictions Check */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-medium">Contradictions Check</h4>
+                            <span
+                              className={`px-2 py-1 rounded text-xs ${
+                                verificationResult.contradictions.has_contradictions === "yes"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-green-100 text-green-800"
+                              }`}
+                            >
+                              {verificationResult.contradictions.has_contradictions === "yes" ? "FOUND" : "CLEAN"}
+                            </span>
+                          </div>
+                          {verificationResult.contradictions.has_contradictions === "yes" ? (
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-2">The following contradictions were found:</p>
+                              <ul className="text-sm space-y-1">
+                                {verificationResult.contradictions.contradictions_list.map((contradiction: string, index: number) => (
+                                  <li key={index} className="text-red-600 bg-red-50 p-2 rounded border-l-4 border-red-300">
+                                    • "{contradiction}"
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-green-700">No contradictions found in the system prompt.</p>
+                          )}
+                        </div>
+
+                        {/* Banned Content Check */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-medium">Banned Content Check</h4>
+                            <span
+                              className={`px-2 py-1 rounded text-xs ${
+                                verificationResult.contradictions.has_banned_content === "yes"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-green-100 text-green-800"
+                              }`}
+                            >
+                              {verificationResult.contradictions.has_banned_content === "yes" ? "FOUND" : "CLEAN"}
+                            </span>
+                          </div>
+                          {verificationResult.contradictions.has_banned_content === "yes" ? (
+                            <div>
+                              <p className="text-sm text-muted-foreground mb-2">The following banned content was found:</p>
+                              <ul className="text-sm space-y-1">
+                                {verificationResult.contradictions.banned_content_list.map((bannedContent: string, index: number) => (
+                                  <li key={index} className="text-red-600 bg-red-50 p-2 rounded border-l-4 border-red-300">
+                                    • "{bannedContent}"
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-green-700">No banned content found in the system prompt.</p>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -902,12 +1131,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="system-prompt" className="block text-sm font-medium mb-2">
                     System Prompt
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="system-prompt"
                     placeholder="Enter the system prompt used..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.systemPrompt}
-                    onChange={(e) => handleResponseCheckerChange("systemPrompt", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("systemPrompt", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -915,12 +1145,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="user-prompt" className="block text-sm font-medium mb-2">
                     User Prompt
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="user-prompt"
                     placeholder="Enter the user's prompt..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.userPrompt}
-                    onChange={(e) => handleResponseCheckerChange("userPrompt", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("userPrompt", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -928,12 +1159,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="tool-call" className="block text-sm font-medium mb-2">
                     Tool Call
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="tool-call"
                     placeholder="Enter the tool call made by the AI..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.toolCall}
-                    onChange={(e) => handleResponseCheckerChange("toolCall", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("toolCall", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -941,12 +1173,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="tool-output" className="block text-sm font-medium mb-2">
                     Tool Output
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="tool-output"
                     placeholder="Enter the output returned by the tool..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.toolOutput}
-                    onChange={(e) => handleResponseCheckerChange("toolOutput", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("toolOutput", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -954,18 +1187,19 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="ai-response" className="block text-sm font-medium mb-2">
                     AI Response
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="ai-response"
                     placeholder="Enter the final AI response..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.aiResponse}
-                    onChange={(e) => handleResponseCheckerChange("aiResponse", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("aiResponse", value)}
+                    rows={5}
                   />
                 </div>
 
                 <div className="flex gap-3 pt-4">
-                  <Button className="flex-1" onClick={analyzeResponse} disabled={isAnalyzing}>
-                    {isAnalyzing ? "Analyzing..." : "Analyze Response"}
+                  <Button className="flex-1" onClick={checkResponse} disabled={isAnalyzing || isCheckingErrorType}>
+                    {isAnalyzing || isCheckingErrorType ? "Checking Response..." : "Check Response"}
                   </Button>
                   <Button variant="outline" className="flex-1 bg-transparent" onClick={clearResponseChecker}>
                     Clear All
@@ -973,12 +1207,12 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                 </div>
               </div>
 
-              {/* Analysis Results Display */}
+              {/* Unified Analysis Results Display */}
               {analysisResult && (
                 <Card className="mt-6">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      Analysis Results
+                      Response Analysis Results
                       {!analysisResult.error && (
                         <span className="text-sm font-normal bg-primary/10 px-2 py-1 rounded">
                           Score: {analysisResult.overallScore}/10
@@ -997,23 +1231,23 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                         {/* Grounding Check */}
                         <div className="border rounded-lg p-4">
                           <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-medium">Grounding Check</h4>
+                            <h4 className="font-medium">Grounding</h4>
                             <span
                               className={`px-2 py-1 rounded text-xs ${
-                                analysisResult.groundingCheck.status === "pass"
+                                analysisResult.grounding.status === "pass"
                                   ? "bg-green-100 text-green-800"
-                                  : analysisResult.groundingCheck.status === "warning"
+                                  : analysisResult.grounding.status === "warning"
                                     ? "bg-yellow-100 text-yellow-800"
                                     : "bg-red-100 text-red-800"
                               }`}
                             >
-                              {analysisResult.groundingCheck.status.toUpperCase()}
+                              {analysisResult.grounding.status.toUpperCase()}
                             </span>
                           </div>
-                          <p className="text-sm text-muted-foreground mb-2">{analysisResult.groundingCheck.details}</p>
-                          {analysisResult.groundingCheck.issues && analysisResult.groundingCheck.issues.length > 0 && (
+                          <p className="text-sm text-muted-foreground mb-2">{analysisResult.grounding.details}</p>
+                          {analysisResult.grounding.issues && analysisResult.grounding.issues.length > 0 && (
                             <ul className="text-sm space-y-1">
-                              {analysisResult.groundingCheck.issues.map((issue: string, index: number) => (
+                              {analysisResult.grounding.issues.map((issue: string, index: number) => (
                                 <li key={index} className="text-red-600">
                                   • {issue}
                                 </li>
@@ -1022,29 +1256,29 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                           )}
                         </div>
 
-                        {/* System Prompt Integrity Check */}
+                        {/* System Prompt Contradictions */}
                         <div className="border rounded-lg p-4">
                           <div className="flex items-center gap-2 mb-2">
-                            <h4 className="font-medium">System Prompt Integrity</h4>
+                            <h4 className="font-medium">System Prompt Contradictions</h4>
                             <span
                               className={`px-2 py-1 rounded text-xs ${
-                                analysisResult.systemPromptIntegrityCheck.status === "pass"
+                                analysisResult.systemPromptContradictions.status === "pass"
                                   ? "bg-green-100 text-green-800"
-                                  : analysisResult.systemPromptIntegrityCheck.status === "warning"
+                                  : analysisResult.systemPromptContradictions.status === "warning"
                                     ? "bg-yellow-100 text-yellow-800"
                                     : "bg-red-100 text-red-800"
                               }`}
                             >
-                              {analysisResult.systemPromptIntegrityCheck.status.toUpperCase()}
+                              {analysisResult.systemPromptContradictions.status.toUpperCase()}
                             </span>
                           </div>
                           <p className="text-sm text-muted-foreground mb-2">
-                            {analysisResult.systemPromptIntegrityCheck.details}
+                            {analysisResult.systemPromptContradictions.details}
                           </p>
-                          {analysisResult.systemPromptIntegrityCheck.issues &&
-                            analysisResult.systemPromptIntegrityCheck.issues.length > 0 && (
+                          {analysisResult.systemPromptContradictions.issues &&
+                            analysisResult.systemPromptContradictions.issues.length > 0 && (
                               <ul className="text-sm space-y-1">
-                                {analysisResult.systemPromptIntegrityCheck.issues.map(
+                                {analysisResult.systemPromptContradictions.issues.map(
                                   (issue: string, index: number) => (
                                     <li key={index} className="text-red-600">
                                       • {issue}
@@ -1055,35 +1289,79 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                             )}
                         </div>
 
-                        {/* Response Completeness Check */}
+                        {/* Response Completeness */}
                         <div className="border rounded-lg p-4">
                           <div className="flex items-center gap-2 mb-2">
                             <h4 className="font-medium">Response Completeness</h4>
                             <span
                               className={`px-2 py-1 rounded text-xs ${
-                                analysisResult.responseCompletenessCheck.status === "pass"
+                                analysisResult.responseCompleteness.status === "pass"
                                   ? "bg-green-100 text-green-800"
-                                  : analysisResult.responseCompletenessCheck.status === "warning"
+                                  : analysisResult.responseCompleteness.status === "warning"
                                     ? "bg-yellow-100 text-yellow-800"
                                     : "bg-red-100 text-red-800"
                               }`}
                             >
-                              {analysisResult.responseCompletenessCheck.status.toUpperCase()}
+                              {analysisResult.responseCompleteness.status.toUpperCase()}
                             </span>
                           </div>
                           <p className="text-sm text-muted-foreground mb-2">
-                            {analysisResult.responseCompletenessCheck.details}
+                            {analysisResult.responseCompleteness.details}
                           </p>
-                          {analysisResult.responseCompletenessCheck.issues &&
-                            analysisResult.responseCompletenessCheck.issues.length > 0 && (
+                          {analysisResult.responseCompleteness.issues &&
+                            analysisResult.responseCompleteness.issues.length > 0 && (
                               <ul className="text-sm space-y-1">
-                                {analysisResult.responseCompletenessCheck.issues.map((issue: string, index: number) => (
+                                {analysisResult.responseCompleteness.issues.map((issue: string, index: number) => (
                                   <li key={index} className="text-red-600">
                                     • {issue}
                                   </li>
                                 ))}
                               </ul>
                             )}
+                        </div>
+
+                        {/* Possible Errors Found */}
+                        <div className="border rounded-lg p-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-medium">Possible Errors Found</h4>
+                            <span
+                              className={`px-2 py-1 rounded text-xs ${
+                                analysisResult.possibleErrors.status === "pass"
+                                  ? "bg-green-100 text-green-800"
+                                  : "bg-orange-100 text-orange-800"
+                              }`}
+                            >
+                              {analysisResult.possibleErrors.status.toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mb-2">
+                            {analysisResult.possibleErrors.details}
+                          </p>
+                          {analysisResult.possibleErrors.errorTypes && analysisResult.possibleErrors.errorTypes.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              {analysisResult.possibleErrors.errorTypes.map((errorType: any, index: number) => (
+                                <div key={index} className="bg-orange-50 border border-orange-200 rounded p-3">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h5 className="font-medium text-orange-800 text-sm">{errorType.type}</h5>
+                                    <span className="px-2 py-1 bg-orange-200 text-orange-800 text-xs rounded">
+                                      {errorType.severity}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-orange-700">{errorType.description}</p>
+                                  {errorType.examples && errorType.examples.length > 0 && (
+                                    <div className="mt-2">
+                                      <p className="text-xs font-medium text-orange-800 mb-1">Examples:</p>
+                                      <ul className="text-xs text-orange-700 space-y-1">
+                                        {errorType.examples.map((example: string, exIndex: number) => (
+                                          <li key={exIndex} className="ml-2">• {example}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Overall Summary */}
@@ -1096,6 +1374,7 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   </CardContent>
                 </Card>
               )}
+
             </CardContent>
           </Card>
         </TabsContent>

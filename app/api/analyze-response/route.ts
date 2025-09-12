@@ -1,29 +1,49 @@
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 import { type NextRequest, NextResponse } from "next/server"
+import { validateApiRequest, sanitizeForPrompt, validateAndSanitizeJSON } from "@/lib/input-validation"
 
 export async function POST(request: NextRequest) {
   try {
-    const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = await request.json()
+    const body = await request.json()
+    
+    // Validate and sanitize input
+    const validation = validateApiRequest(
+      body,
+      ['systemPrompt', 'userPrompt', 'toolCall', 'toolOutput', 'aiResponse'],
+      request.headers.get('x-forwarded-for') || 'anonymous'
+    )
 
-    const analysisPrompt = `You are an AI response analyzer. Analyze the following AI interaction and provide detailed feedback on three key areas:
+    if (!validation.isValid) {
+      return NextResponse.json(
+        { 
+          error: "Input validation failed", 
+          details: validation.errors 
+        }, 
+        { status: 400 }
+      )
+    }
+
+    const { systemPrompt, userPrompt, toolCall, toolOutput, aiResponse } = validation.sanitizedBody
+
+    const analysisPrompt = `You are an AI response analyzer. Analyze the following AI interaction and provide detailed feedback on two key areas:
 
 SYSTEM PROMPT:
-${systemPrompt}
+${sanitizeForPrompt(systemPrompt)}
 
 USER PROMPT:
-${userPrompt}
+${sanitizeForPrompt(userPrompt)}
 
 TOOL CALL:
-${toolCall}
+${sanitizeForPrompt(toolCall)}
 
 TOOL OUTPUT:
-${toolOutput}
+${sanitizeForPrompt(toolOutput)}
 
 AI RESPONSE:
-${aiResponse}
+${sanitizeForPrompt(aiResponse)}
 
-Please analyze and provide results for these three checks:
+Please analyze and provide results for these two checks:
 
 **1. GROUNDING CHECK**  
 Verify whether every factual statement in the AI response is **supported by either**:  
@@ -37,18 +57,7 @@ The agent must:
 
 ---
 
-**2. SYSTEM PROMPT INTEGRITY CHECK**  
-Evaluate if the tool call, tool output, and response remain consistent with the **instructions, rules, and role constraints** in the system prompt.  
-
-The agent must:  
-- Check whether the tool was called when required and avoided when prohibited.  
-- Verify the AI interpreted the tool output correctly (no misreadings or distortions).  
-- Confirm the response follows role, tone, scope, and format requirements specified by the system prompt.  
-- Flag any violations, omissions, or overreach (e.g., giving advice outside of scope, ignoring constraints, or adding unsupported style).  
-
----
-
-**3. RESPONSE COMPLETENESS CHECK**  
+**2. RESPONSE COMPLETENESS CHECK**  
 Evaluate whether the response fulfills **all explicit and implicit requirements** in the user prompt.  
 
 The agent must:  
@@ -65,18 +74,11 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
     "details": "detailed explanation",
     "issues": ["list of specific issues if any"]
   },
-  "systemPromptIntegrityCheck": {
-    "status": "pass" | "fail" | "warning", 
-    "details": "detailed explanation",
-    "issues": ["list of specific issues if any"]
-  },
   "responseCompletenessCheck": {
     "status": "pass" | "fail" | "warning",
     "details": "detailed explanation", 
     "issues": ["list of specific issues if any"]
-  },
-  "overallScore": 8,
-  "summary": "brief overall assessment"
+  }
 }`
 
     const { text } = await generateText({
@@ -106,19 +108,10 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
     console.log("[v0] Cleaned text for parsing:", cleanedText)
 
     let analysisResult
-    try {
-      analysisResult = JSON.parse(cleanedText)
-
-      // Validate the structure
-      if (
-        !analysisResult.groundingCheck ||
-        !analysisResult.systemPromptIntegrityCheck ||
-        !analysisResult.responseCompletenessCheck
-      ) {
-        throw new Error("Invalid response structure")
-      }
-    } catch (parseError) {
-      console.error("[v0] JSON Parse Error:", parseError)
+    const jsonValidation = validateAndSanitizeJSON(cleanedText)
+    
+    if (!jsonValidation.isValid) {
+      console.error("[v0] JSON Validation Error:", jsonValidation.error)
       console.error("[v0] Raw text:", text)
 
       // Return a fallback structure
@@ -126,20 +119,25 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
         groundingCheck: {
           status: "fail",
           details: "Analysis failed due to parsing error",
-          issues: ["Could not parse AI response"],
-        },
-        systemPromptIntegrityCheck: {
-          status: "fail",
-          details: "Analysis failed due to parsing error",
-          issues: ["Could not parse AI response"],
+          issues: ["Could not parse AI response safely"],
         },
         responseCompletenessCheck: {
           status: "fail",
           details: "Analysis failed due to parsing error",
-          issues: ["Could not parse AI response"],
+          issues: ["Could not parse AI response safely"],
         },
         overallScore: 0,
         summary: "Analysis could not be completed due to technical error",
+      }
+    } else {
+      analysisResult = jsonValidation.data
+
+      // Validate the structure
+      if (
+        !analysisResult.groundingCheck ||
+        !analysisResult.responseCompletenessCheck
+      ) {
+        throw new Error("Invalid response structure")
       }
     }
 
