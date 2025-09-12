@@ -1,7 +1,7 @@
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 import { type NextRequest, NextResponse } from "next/server"
-import { validateApiRequest, sanitizeForPrompt } from "@/lib/input-validation"
+import { validateApiRequest, sanitizeForPrompt, validateAndSanitizeJSON } from "@/lib/input-validation"
 
 export async function POST(request: NextRequest) {
   try {
@@ -118,8 +118,21 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
     console.log("[v0] Cleaned text for parsing:", cleanedText)
 
     let analysisResult
-    try {
-      analysisResult = JSON.parse(cleanedText)
+    const jsonValidation = validateAndSanitizeJSON(cleanedText)
+    
+    if (!jsonValidation.isValid) {
+      console.error("[v0] JSON Validation Error:", jsonValidation.error)
+      console.error("[v0] Raw text:", text)
+
+      // Return a fallback structure
+      analysisResult = {
+        errorCount: 0,
+        errorTypes: [],
+        recommendations: ["Unable to parse error analysis results safely"],
+        summary: "Error analysis could not be completed due to parsing error",
+      }
+    } else {
+      analysisResult = jsonValidation.data
 
       // Validate the structure
       if (
@@ -129,17 +142,6 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
         typeof analysisResult.summary !== "string"
       ) {
         throw new Error("Invalid response structure")
-      }
-    } catch (parseError) {
-      console.error("[v0] JSON Parse Error:", parseError)
-      console.error("[v0] Raw text:", text)
-
-      // Return a fallback structure
-      analysisResult = {
-        errorCount: 0,
-        errorTypes: [],
-        recommendations: ["Unable to parse error analysis results"],
-        summary: "Error analysis could not be completed due to parsing error",
       }
     }
 

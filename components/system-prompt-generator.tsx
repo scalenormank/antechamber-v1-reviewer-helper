@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Bot, CheckCircle, ImageIcon, X, CheckSquare, RotateCcw, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { SecureTextArea, SecureContentDisplay } from "@/components/secure-content-display"
 
 const TOOL_CATEGORIES = {
   "Device & System Control": [
@@ -993,12 +994,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                 <label htmlFor="verification-input" className="block text-sm font-medium mb-2">
                   System Prompt to Verify
                 </label>
-                <textarea
+                <SecureTextArea
                   id="verification-input"
                   value={verificationInput}
-                  onChange={(e) => setVerificationInput(e.target.value)}
+                  onChange={setVerificationInput}
                   placeholder="Paste your system prompt here for verification..."
                   className="w-full min-h-[200px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
+                  rows={8}
                 />
               </div>
 
@@ -1129,12 +1131,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="system-prompt" className="block text-sm font-medium mb-2">
                     System Prompt
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="system-prompt"
                     placeholder="Enter the system prompt used..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.systemPrompt}
-                    onChange={(e) => handleResponseCheckerChange("systemPrompt", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("systemPrompt", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -1142,12 +1145,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="user-prompt" className="block text-sm font-medium mb-2">
                     User Prompt
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="user-prompt"
                     placeholder="Enter the user's prompt..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.userPrompt}
-                    onChange={(e) => handleResponseCheckerChange("userPrompt", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("userPrompt", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -1155,12 +1159,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="tool-call" className="block text-sm font-medium mb-2">
                     Tool Call
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="tool-call"
                     placeholder="Enter the tool call made by the AI..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.toolCall}
-                    onChange={(e) => handleResponseCheckerChange("toolCall", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("toolCall", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -1168,12 +1173,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="tool-output" className="block text-sm font-medium mb-2">
                     Tool Output
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="tool-output"
                     placeholder="Enter the output returned by the tool..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.toolOutput}
-                    onChange={(e) => handleResponseCheckerChange("toolOutput", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("toolOutput", value)}
+                    rows={5}
                   />
                 </div>
 
@@ -1181,12 +1187,13 @@ Write in natural paragraphs (no bullet points or lists) and make it feel cohesiv
                   <label htmlFor="ai-response" className="block text-sm font-medium mb-2">
                     AI Response
                   </label>
-                  <textarea
+                  <SecureTextArea
                     id="ai-response"
                     placeholder="Enter the final AI response..."
                     className="w-full min-h-[120px] p-3 border border-input rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-ring"
                     value={responseCheckerData.aiResponse}
-                    onChange={(e) => handleResponseCheckerChange("aiResponse", e.target.value)}
+                    onChange={(value) => handleResponseCheckerChange("aiResponse", value)}
+                    rows={5}
                   />
                 </div>
 

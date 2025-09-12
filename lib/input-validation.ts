@@ -29,8 +29,8 @@ export const DEFAULT_SECURITY_CONFIG: SecurityConfig = {
     /user\s*:\s*/i,
     /<\|.*?\|>/g, // Special tokens
     /\[\[.*?\]\]/g, // Bracket patterns
-    /```.*?```/gs, // Code blocks
-    /<script.*?>.*?<\/script>/gis, // Script tags
+    /```[\s\S]*?```/g, // Code blocks
+    /<script[^>]*>.*?<\/script>/gi, // Script tags
     /javascript:/i,
     /data:text\/html/i,
     /vbscript:/i,
@@ -150,6 +150,86 @@ export function sanitizeForPrompt(input: string): string {
     .replace(/\n{10,}/g, '\n\n') // Limit excessive newlines
     .replace(/\s{5,}/g, ' ') // Limit excessive spaces
     .trim()
+}
+
+export function sanitizeForHTML(input: string): string {
+  // Comprehensive HTML sanitization to prevent XSS
+  return input
+    .replace(/&/g, '&amp;')     // Must be first
+    .replace(/</g, '&lt;')       // Less than
+    .replace(/>/g, '&gt;')       // Greater than
+    .replace(/"/g, '&quot;')     // Double quotes
+    .replace(/'/g, '&#x27;')     // Single quotes
+    .replace(/\//g, '&#x2F;')    // Forward slash
+    .replace(/`/g, '&#x60;')     // Backtick
+    .replace(/=/g, '&#x3D;')     // Equals sign
+}
+
+export function sanitizeForJSON(input: string): string {
+  // Sanitize for safe JSON parsing
+  return input
+    .replace(/\\/g, '\\\\')      // Escape backslashes
+    .replace(/"/g, '\\"')        // Escape double quotes
+    .replace(/\n/g, '\\n')       // Escape newlines
+    .replace(/\r/g, '\\r')       // Escape carriage returns
+    .replace(/\t/g, '\\t')       // Escape tabs
+    .replace(/\b/g, '\\b')       // Escape backspace
+    .replace(/\f/g, '\\f')       // Escape form feed
+}
+
+export function validateAndSanitizeJSON(jsonString: string): { isValid: boolean; data: any; error?: string } {
+  try {
+    // First, sanitize the input
+    const sanitized = sanitizeForJSON(jsonString)
+    
+    // Parse the JSON
+    const parsed = JSON.parse(sanitized)
+    
+    // Additional validation for common XSS patterns in JSON
+    const jsonStringified = JSON.stringify(parsed)
+    if (jsonStringified.includes('<script') || 
+        jsonStringified.includes('javascript:') ||
+        jsonStringified.includes('onload=') ||
+        jsonStringified.includes('onerror=')) {
+      return {
+        isValid: false,
+        data: null,
+        error: 'Potentially malicious content detected in JSON'
+      }
+    }
+    
+    return {
+      isValid: true,
+      data: parsed
+    }
+  } catch (error) {
+    return {
+      isValid: false,
+      data: null,
+      error: `JSON parsing failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+}
+
+export function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+}
+
+export function stripScripts(input: string): string {
+  return input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove script tags
+    .replace(/javascript:/gi, '') // Remove javascript: URLs
+    .replace(/on\w+\s*=/gi, '') // Remove event handlers
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '') // Remove iframes
+    .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '') // Remove objects
+    .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '') // Remove embeds
+    .replace(/<link\b[^<]*(?:(?!<\/link>)<[^<]*)*<\/link>/gi, '') // Remove link tags
+    .replace(/<meta\b[^<]*(?:(?!<\/meta>)<[^<]*)*<\/meta>/gi, '') // Remove meta tags
 }
 
 export function validateApiRequest(

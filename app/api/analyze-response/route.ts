@@ -1,7 +1,7 @@
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 import { type NextRequest, NextResponse } from "next/server"
-import { validateApiRequest, sanitizeForPrompt } from "@/lib/input-validation"
+import { validateApiRequest, sanitizeForPrompt, validateAndSanitizeJSON } from "@/lib/input-validation"
 
 export async function POST(request: NextRequest) {
   try {
@@ -108,18 +108,10 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
     console.log("[v0] Cleaned text for parsing:", cleanedText)
 
     let analysisResult
-    try {
-      analysisResult = JSON.parse(cleanedText)
-
-      // Validate the structure
-      if (
-        !analysisResult.groundingCheck ||
-        !analysisResult.responseCompletenessCheck
-      ) {
-        throw new Error("Invalid response structure")
-      }
-    } catch (parseError) {
-      console.error("[v0] JSON Parse Error:", parseError)
+    const jsonValidation = validateAndSanitizeJSON(cleanedText)
+    
+    if (!jsonValidation.isValid) {
+      console.error("[v0] JSON Validation Error:", jsonValidation.error)
       console.error("[v0] Raw text:", text)
 
       // Return a fallback structure
@@ -127,15 +119,25 @@ IMPORTANT: You must respond with ONLY valid JSON in exactly this format. Do not 
         groundingCheck: {
           status: "fail",
           details: "Analysis failed due to parsing error",
-          issues: ["Could not parse AI response"],
+          issues: ["Could not parse AI response safely"],
         },
         responseCompletenessCheck: {
           status: "fail",
           details: "Analysis failed due to parsing error",
-          issues: ["Could not parse AI response"],
+          issues: ["Could not parse AI response safely"],
         },
         overallScore: 0,
         summary: "Analysis could not be completed due to technical error",
+      }
+    } else {
+      analysisResult = jsonValidation.data
+
+      // Validate the structure
+      if (
+        !analysisResult.groundingCheck ||
+        !analysisResult.responseCompletenessCheck
+      ) {
+        throw new Error("Invalid response structure")
       }
     }
 
